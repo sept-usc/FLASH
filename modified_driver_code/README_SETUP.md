@@ -135,6 +135,52 @@ The version string looks like `550.163.01-0ubuntu1`; use exactly what
 will not match the modules built in step 5. `apt-mark hold` stops a later
 upgrade from breaking the match.
 
+
+### UVM persistence mode
+
+`nvidia-persistenced` must run with `--uvm-persistence-mode`. Without it the
+UVM module cannot keep the GPU initialized across process exits in
+confidential computing mode, and runs fail or fall back to uninitialized
+state. Ubuntu's packaged unit starts the daemon with `--no-persistence-mode`,
+and because systemd already has it running, a manual
+`sudo nvidia-persistenced --uvm-persistence-mode` is refused as already
+running and leaves the wrong mode in place.
+
+Check which flag is in use:
+
+```bash
+ps aux | grep [n]vidia-persistenced
+```
+
+If it shows `--no-persistence-mode`, change the unit:
+
+```bash
+sudo vim /usr/lib/systemd/system/nvidia-persistenced.service
+# in ExecStart, replace --no-persistence-mode with --uvm-persistence-mode
+
+sudo systemctl daemon-reload
+sudo systemctl enable nvidia-persistenced.service
+sudo reboot
+```
+
+`sudo systemctl edit --full nvidia-persistenced.service` makes the same change
+in a copy under `/etc/systemd/system/`, which survives a driver package
+upgrade. Either way, confirm the flag after the reboot:
+
+```bash
+ps aux | grep [n]vidia-persistenced     # expect --uvm-persistence-mode
+```
+
+**After every boot**, before running any workload:
+
+```bash
+sudo nvidia-smi conf-compute -srs 1
+```
+
+In confidential computing mode the GPU does not accept work until it is marked
+ready. If `nvidia-persistenced` is not managed by systemd on your guest, start
+it yourself first: `sudo nvidia-persistenced --uvm-persistence-mode`.
+
 ## 3. Stop Ubuntu from loading the distro kernel modules
 
 ```bash
@@ -187,51 +233,6 @@ sudo nvidia-smi conf-compute -d     # DevTools mode: expect OFF
 If the feature reports OFF, the GPU's confidential computing mode has not been
 enabled. That is set from the host before the GPU is passed through; see the
 VM setup instructions.
-
-### UVM persistence mode
-
-`nvidia-persistenced` must run with `--uvm-persistence-mode`. Without it the
-UVM module cannot keep the GPU initialized across process exits in
-confidential computing mode, and runs fail or fall back to uninitialized
-state. Ubuntu's packaged unit starts the daemon with `--no-persistence-mode`,
-and because systemd already has it running, a manual
-`sudo nvidia-persistenced --uvm-persistence-mode` is refused as already
-running and leaves the wrong mode in place.
-
-Check which flag is in use:
-
-```bash
-ps aux | grep [n]vidia-persistenced
-```
-
-If it shows `--no-persistence-mode`, change the unit:
-
-```bash
-sudo vim /usr/lib/systemd/system/nvidia-persistenced.service
-# in ExecStart, replace --no-persistence-mode with --uvm-persistence-mode
-
-sudo systemctl daemon-reload
-sudo systemctl enable nvidia-persistenced.service
-sudo reboot
-```
-
-`sudo systemctl edit --full nvidia-persistenced.service` makes the same change
-in a copy under `/etc/systemd/system/`, which survives a driver package
-upgrade. Either way, confirm the flag after the reboot:
-
-```bash
-ps aux | grep [n]vidia-persistenced     # expect --uvm-persistence-mode
-```
-
-**After every boot**, before running any workload:
-
-```bash
-sudo nvidia-smi conf-compute -srs 1
-```
-
-In confidential computing mode the GPU does not accept work until it is marked
-ready. If `nvidia-persistenced` is not managed by systemd on your guest, start
-it yourself first: `sudo nvidia-persistenced --uvm-persistence-mode`.
 
 ## 7. Verify that FLASH's module is the one installed and loaded
 
