@@ -266,6 +266,7 @@ NV_STATUS uvm_api_live_migration_decrypt_encrypted_pages(UVM_LIVE_MIGRATION_DECR
 NV_STATUS uvm_api_live_migration_read_pages_resident_encrypted_v2(UVM_LIVE_MIGRATION_READ_PAGES_RESIDENT_ENCRYPTED_PARAMS *params, struct file *filp);
 NV_STATUS uvm_api_live_migration_read_pages_resident_mt(UVM_LIVE_MIGRATION_READ_PAGES_RESIDENT_MT_PARAMS *params, struct file *filp);
 NV_STATUS uvm_api_live_migration_read_pages_resident_encrypted_mt(UVM_LIVE_MIGRATION_READ_PAGES_RESIDENT_ENCRYPTED_MT_PARAMS *params, struct file *filp);
+NV_STATUS uvm_api_live_migration_read_dirty_delta_encrypted_mt(UVM_LIVE_MIGRATION_READ_DIRTY_DELTA_ENCRYPTED_MT_PARAMS *params, struct file *filp);
 NV_STATUS uvm_api_live_migration_bench_decompose(UVM_LIVE_MIGRATION_BENCH_DECOMPOSE_PARAMS *params, struct file *filp);
 
 #endif // __UVM_API_H__

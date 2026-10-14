@@ -5,6 +5,18 @@ Complete [README_SETUP.md](../modified_driver_code/README_SETUP.md) first, inclu
 the guest VM. Commands assume you start in the directory that contains
 `artifact_flash/`.
 
+## Build prerequisites
+
+FLASH's checkpoint code and both baselines link against OpenSSL for AES-GCM,
+so install the headers once before building anything under `benchmarks/`:
+
+```bash
+sudo apt-get install -y libssl-dev
+```
+
+Without it every `make` below stops at
+`openssl/evp.h: No such file or directory`.
+
 ## System settings
 
 Apply these inside the guest after every boot, before running any benchmark.
@@ -35,7 +47,6 @@ pages cut the number of those operations by 512x.
 sudo nvidia-smi -lgc 1980
 sudo nvidia-smi -lmc 2619
 
-sudo nvidia-persistenced --uvm-persistence-mode
 sudo nvidia-smi conf-compute -srs 1
 ```
 
@@ -43,6 +54,17 @@ When idle, the H100 drops to about 17% of its peak clock and does not ramp up
 fast enough for short transfers, which lowers measured bandwidth by roughly
 40%. Locking the clocks removes that. The last command marks the GPU ready to
 accept work in confidential computing mode.
+
+`nvidia-persistenced` must already be running with `--uvm-persistence-mode`:
+
+```bash
+ps aux | grep [n]vidia-persistenced     # expect --uvm-persistence-mode
+```
+
+That is a one-time change to the systemd unit, not a per-boot command; see
+"UVM persistence mode" in step 6 of
+[README_SETUP.md](../modified_driver_code/README_SETUP.md) if the flag is
+`--no-persistence-mode`.
 
 ---
 

@@ -103,6 +103,20 @@ else
     else fail "CE channel pool is ${n:-unknown}, expected $EXPECTED_CE_CHANNELS"; fi
 fi
 
+# ---------------------------------------------------------------------------
+# 5. nvidia-persistenced must run with --uvm-persistence-mode. Without it the
+#    GPU cannot stay initialized for UVM in confidential computing mode.
+# ---------------------------------------------------------------------------
+echo "[5] nvidia-persistenced mode"
+pargs="$(ps -o args= -C nvidia-persistenced 2>/dev/null | head -1)"
+if [[ -z "$pargs" ]]; then
+    fail "nvidia-persistenced is not running (see 'UVM persistence mode' in README_SETUP.md step 6)"
+elif [[ "$pargs" == *--uvm-persistence-mode* ]]; then
+    pass "running with --uvm-persistence-mode"
+else
+    fail "running without --uvm-persistence-mode: $pargs"
+fi
+
 echo
 echo "summary: $npass passed, $nfail failed, $nwarn warnings"
 (( nfail == 0 ))

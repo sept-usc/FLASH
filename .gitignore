@@ -17,9 +17,11 @@ benchmarks/flash/restore_agent
 
 # Run output
 *.log
+*.out
 *.jsonl
 *.csv
 results/
+artifact_flash_log/
 
 # Datasets and models (fetch with benchmarks/download.sh)
 *.json.gz

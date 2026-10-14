@@ -33,7 +33,8 @@ phase overlapped with the running workload.
 - A guest running Ubuntu 24.04 with 300 GB of memory, 64 vCPUs and a 300 GB
   disk.
 - CUDA 12.4 and NVIDIA driver 550.163.01, both pinned. Building the driver
-  needs the kernel headers.
+  needs the kernel headers; building the benchmarks needs the OpenSSL headers
+  (`libssl-dev`).
 
 The driver changes are specific to confidential computing on an H100 with UVM.
 They will not produce meaningful results on a GPU that is not in confidential

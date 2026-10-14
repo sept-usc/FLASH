@@ -93,8 +93,14 @@ Inside the guest:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential linux-headers-$(uname -r) git zstd binutils
+sudo apt-get install -y build-essential linux-headers-$(uname -r) git zstd binutils \
+                        libssl-dev
 ```
+
+`libssl-dev` is needed for the benchmarks, not for the driver: FLASH's
+checkpoint code and both baselines link against OpenSSL for AES-GCM
+(`-lssl -lcrypto`). Without it, `make` in `benchmarks/` stops at
+`openssl/evp.h: No such file or directory`.
 
 ## 1. Install the CUDA toolkit (without its driver)
 
@@ -182,15 +188,50 @@ If the feature reports OFF, the GPU's confidential computing mode has not been
 enabled. That is set from the host before the GPU is passed through; see the
 VM setup instructions.
 
+### UVM persistence mode
+
+`nvidia-persistenced` must run with `--uvm-persistence-mode`. Without it the
+UVM module cannot keep the GPU initialized across process exits in
+confidential computing mode, and runs fail or fall back to uninitialized
+state. Ubuntu's packaged unit starts the daemon with `--no-persistence-mode`,
+and because systemd already has it running, a manual
+`sudo nvidia-persistenced --uvm-persistence-mode` is refused as already
+running and leaves the wrong mode in place.
+
+Check which flag is in use:
+
+```bash
+ps aux | grep [n]vidia-persistenced
+```
+
+If it shows `--no-persistence-mode`, change the unit:
+
+```bash
+sudo vim /usr/lib/systemd/system/nvidia-persistenced.service
+# in ExecStart, replace --no-persistence-mode with --uvm-persistence-mode
+
+sudo systemctl daemon-reload
+sudo systemctl enable nvidia-persistenced.service
+sudo reboot
+```
+
+`sudo systemctl edit --full nvidia-persistenced.service` makes the same change
+in a copy under `/etc/systemd/system/`, which survives a driver package
+upgrade. Either way, confirm the flag after the reboot:
+
+```bash
+ps aux | grep [n]vidia-persistenced     # expect --uvm-persistence-mode
+```
+
 **After every boot**, before running any workload:
 
 ```bash
-sudo nvidia-persistenced --uvm-persistence-mode
 sudo nvidia-smi conf-compute -srs 1
 ```
 
 In confidential computing mode the GPU does not accept work until it is marked
-ready.
+ready. If `nvidia-persistenced` is not managed by systemd on your guest, start
+it yourself first: `sudo nvidia-persistenced --uvm-persistence-mode`.
 
 ## 7. Verify that FLASH's module is the one installed and loaded
 
@@ -214,6 +255,8 @@ It checks:
    550.163.01.
 4. **CE channel pool.** FLASH's `uvm_channel.c` logs the copy engine channel
    pool size at module load. The evaluation used 4.
+5. **UVM persistence mode.** `nvidia-persistenced` must be running with
+   `--uvm-persistence-mode`, as set above.
 
 Every check should print `PASS`. The equivalent manual commands are:
 
@@ -222,6 +265,7 @@ modinfo -n nvidia_uvm
 zstd -dc "$(modinfo -n nvidia_uvm)" | strings | grep uvm_api_live_migration
 grep uvm_api_live_migration /proc/kallsyms
 sudo dmesg | grep 'pool_type=CE'
+ps -o args= -C nvidia-persistenced
 ```
 
 ## Troubleshooting
