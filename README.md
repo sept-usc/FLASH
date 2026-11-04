@@ -4,11 +4,11 @@
 
 **ACM SIGOPS ATC 2026**
 
-[![Paper PDF](https://img.shields.io/badge/Paper-PDF-b31b1b)](docs/flash-atc2026.pdf) [![Artifact DOI](https://img.shields.io/badge/Artifact-10.5281%2Fzenodo.23199897-blue)](https://doi.org/10.5281/zenodo.23199897) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-FLASH checkpoints confidential LLM inference on **NVIDIA H100 with Intel TDX**. It preserves GPU-encrypted state and tracks modified GPU pages so that most copying overlaps with serving. The final pause copies only the dirty delta, reducing the interruption needed to save a running inference workload.
-
 Jonghyun Lee, Taewoon Kang, Yongqin Wang, Rachit Rajat, Mengyuan Li, Gunjae Koo, Daniel Wong, and Murali Annavaram.
+
+[![Paper PDF](https://img.shields.io/badge/Paper-PDF-b31b1b)](docs/flash-atc2026.pdf) [![Artifact DOI](https://img.shields.io/badge/Artifact-10.5281%2Fzenodo.23199897-blue)](https://doi.org/10.5281/zenodo.23199897) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Presented by verifiable.pro](docs/brand/presented-by-verifiable-pro.svg)](https://verifiable.pro/)
+
+FLASH is a **GPU checkpoint/restore system for confidential LLM inference** on **NVIDIA H100 and Intel TDX**. It saves encrypted GPU data, including the key-value (KV) cache, while vLLM continues serving requests. A hybrid-key checkpoint format avoids redundant CPU cryptography, and UVM write faults identify the pages that must be copied during the final pause.
 
 <p>
   <a href="https://sysartifacts.github.io/atc2026/results"><img src="docs/badges/acm-available-v1.1.png" alt="ACM Artifacts Available v1.1" width="90"></a>
@@ -18,31 +18,31 @@ Jonghyun Lee, Taewoon Kang, Yongqin Wang, Rachit Rajat, Mengyuan Li, Gunjae Koo,
 
 Awarded **Artifacts Available**, **Artifacts Evaluated — Functional**, and **Results Reproduced** in the [ATC 2026 artifact evaluation](https://sysartifacts.github.io/atc2026/results).
 
-[How FLASH works](#how-flash-works) · [Paper results](#paper-results) · [Getting started](#getting-started) · [Repository guide](#repository-guide) · [Citation](#citation)
+[Design](#how-flash-checkpoints-encrypted-gpu-state) · [Results](#checkpoint-latency-results) · [Setup and reproduction](#getting-started) · [Repository guide](#repository-guide) · [Citation](#citation) · [Research links](#research-and-presentation)
 
 ## Why checkpointing confidential inference is difficult
 
-Long-running LLM sessions accumulate valuable key-value (KV) cache state. Losing that state forces a cold restart and repeated computation. GPU confidential computing protects the model and its state from an untrusted host, but also makes saving that state expensive: GPU memory must leave the device encrypted over PCIe.
+Long-running LLM sessions accumulate valuable KV cache state. Losing that state forces a cold restart and repeated computation. GPU confidential computing protects the model and its state from an untrusted host, but also makes saving that state expensive: GPU memory must leave the device encrypted over PCIe.
 
 A conventional secure checkpoint decrypts the arriving GPU data on the CPU, then encrypts it again under a checkpoint key. Copying the full GPU footprint while serving is paused compounds this cost. In the paper's H100 measurements, confidential-mode transfer bandwidth falls from about **40 GB/s to 7.3 GB/s**; transferring 80 GB alone takes roughly **11 seconds**, before the additional checkpoint encryption.
 
 FLASH addresses both sources of overhead: it retains the GPU's ciphertext and reduces how much data must be copied during the pause.
 
-## How FLASH works
+## How FLASH checkpoints encrypted GPU state
 
 ### 1. Keep the GPU's ciphertext in the checkpoint
 
-![Paper Figure 4: the baseline decrypts GPU ciphertext on the CPU and encrypts it again; FLASH stores the GPU ciphertext directly alongside separately protected CPU state and key material.](docs/figures/hybrid-key.png)
+![FLASH hybrid-key checkpoint architecture: the conventional path decrypts GPU ciphertext on the CPU and encrypts it again; FLASH retains copy-engine ciphertext and separately protects CPU state and the GPU key.](docs/figures/hybrid-key.svg)
 
-*Paper Figure 4. Baseline checkpoint and FLASH's hybrid-key checkpoint.*
+*Hybrid-key checkpointing. The same GPU ciphertext crosses PCIe and enters FLASH's checkpoint image; CPU state and the source GPU key use a separate protection domain. Redrawn from paper Figure 4.*
 
 The GPU copy engine (CE) already encrypts device-to-host transfers. FLASH retrieves that ciphertext, its initialization vectors (IVs), and authentication tags through a custom driver IOCTL. It stores them directly in the image, avoiding the CPU decrypt-then-reencrypt cycle on the checkpoint path. CPU state and the GPU decryption key are protected separately under the checkpoint key. Restore reconstructs the source decryption context before moving data into the destination GPU's protected memory.
 
 ### 2. Track dirty GPU pages while serving continues
 
-![Paper Figure 5: FLASH interposes on GPU allocations, marks UVM pages read-only, records writes in a dirty bitmap, and pauses execution only to copy the dirty pages.](docs/figures/dirty-tracking.png)
+![FLASH concurrent GPU checkpoint workflow: mark UVM pages read-only, copy while inference runs, use write faults to mark dirty 2 MB regions, then pause briefly to copy the dirty delta and resume.](docs/figures/dirty-tracking.svg)
 
-*Paper Figure 5. UVM write faults identify the pages that must be copied again.*
+*Concurrent checkpointing with UVM dirty tracking. Most copying overlaps with inference; the final pause captures pages modified during the tracking window. Redrawn from paper Figure 5.*
 
 FLASH interposes on CUDA allocations to bring them under Unified Virtual Memory (UVM) control. During concurrent copying, it uses read-only permissions and write faults to record modified memory at **2 MB granularity**. Once the background copy finishes, FLASH pauses the workload, copies the dirty pages, and resumes serving. Tracking happens in the driver, without modifying LLM kernels or requiring offline PTX analysis.
 
@@ -52,7 +52,7 @@ Model weights usually remain unchanged after loading. In the paper's design, FLA
 
 The paper's security protocol protects checkpoint confidentiality, integrity, and freshness using attestation and a trusted remote service for key release and freshness records. See [Section 6 of the paper](docs/flash-atc2026.pdf#page=8) for the trust assumptions and security analysis.
 
-## Paper results
+## Checkpoint latency results
 
 ![Paper Figure 6: concurrent-copy and stop-and-copy latency across Llama-3.2-1B, Qwen-2.5-7B, and Llama-2-13B for Chatbot and Reasoning workloads; FLASH has shorter stop-and-copy phases than the comparison implementations.](docs/figures/checkpoint-latency.png)
 
@@ -145,7 +145,9 @@ The serving experiments compare PhOS, GCR, FLASH-SC, and FLASH with the model/wo
 | [`benchmarks/bandwidth_breakdown/`](benchmarks/bandwidth_breakdown/) | Confidential-mode copy-path decomposition |
 | [`benchmarks/prealloc/`](benchmarks/prealloc/) | Checkpoint image and staging-buffer preallocation |
 | [`benchmarks/download.sh`](benchmarks/download.sh) | Model and ShareGPT dataset downloads |
-| [`docs/flash-atc2026.pdf`](docs/flash-atc2026.pdf) | Final paper; README figures are extracted from this version |
+| [`docs/flash-atc2026.pdf`](docs/flash-atc2026.pdf) | Final paper and evaluation details |
+| [`docs/figures/`](docs/figures/) | Editable SVG diagrams, PNG exports, and the original latency plot |
+| [`docs/verifiable-pro/`](docs/verifiable-pro/) | English and Chinese FLASH explainer drafts for verifiable.pro |
 
 ## Scope and limitations
 
@@ -174,4 +176,16 @@ The evaluated artifact is archived at [Zenodo, DOI: 10.5281/zenodo.23199897](htt
 
 ## License
 
-The FLASH code is [MIT licensed](LICENSE). Files derived from NVIDIA's `open-gpu-kernel-modules` retain their original dual **MIT / GPL-2.0** license. The paper and its figures are licensed under **CC BY 4.0**, as stated in the paper; [figure provenance](docs/figures/README.md) and [badge sources](docs/badges/README.md) are recorded separately.
+The FLASH code is [MIT licensed](LICENSE). Files derived from NVIDIA's `open-gpu-kernel-modules` retain their original dual **MIT / GPL-2.0** license. The paper and its figures are licensed under **CC BY 4.0**; the two redesigned diagrams adapt the paper's mechanisms. See [figure provenance](docs/figures/README.md), [ACM badge sources](docs/badges/README.md), and [brand asset sources](docs/brand/README.md).
+
+## Research and presentation
+
+<p>
+  <a href="https://septlab.com/"><img src="docs/brand/septlab-icon.png" alt="SEPT Lab" height="38"></a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="https://verifiable.pro/"><img src="docs/brand/presented-by-verifiable-pro-lockup.svg" alt="Presented by verifiable.pro" height="38"></a>
+</p>
+
+Explore systems security research at [SEPT Lab](https://septlab.com/) and research explanations about verifiable AI at [verifiable.pro](https://verifiable.pro/).
+
+**Presented by verifiable.pro** · Read the FLASH explainer draft in [English](docs/verifiable-pro/en.md) or [中文](docs/verifiable-pro/zh.md).
