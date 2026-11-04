@@ -2,8 +2,17 @@
 
 Complete [README_SETUP.md](../modified_driver_code/README_SETUP.md) first, including step 7:
 `verify_driver.sh` must report every check as `PASS`. All benchmarks run inside
-the guest VM. Commands assume you start in the directory that contains
-`artifact_flash/`.
+the guest VM. Clone this repository as `artifact_flash`, as shown in the
+[top-level README](../README.md). In each terminal, set the repository root
+from your checkout before using the commands below:
+
+```bash
+cd /path/to/artifact_flash
+export FLASH_ROOT="$PWD"
+```
+
+`/path/to/artifact_flash` is your local checkout path. All paths below use
+`FLASH_ROOT`, so build steps do not depend on the previous working directory.
 
 ## Build prerequisites
 
@@ -62,7 +71,7 @@ ps aux | grep [n]vidia-persistenced     # expect --uvm-persistence-mode
 ```
 
 That is a one-time change to the systemd unit, not a per-boot command; see
-"UVM persistence mode" in step 6 of
+"UVM persistence mode" in step 2 of
 [README_SETUP.md](../modified_driver_code/README_SETUP.md) if the flag is
 `--no-persistence-mode`.
 
@@ -73,8 +82,7 @@ That is a one-time change to the systemd unit, not a per-boot command; see
 ### Build
 
 ```bash
-cd artifact_flash/benchmarks/table1_bandwidth
-make
+make -C "$FLASH_ROOT/benchmarks/table1_bandwidth"
 ```
 
 ### Run
@@ -83,8 +91,10 @@ Run both binaries once in the TD (confidential computing on) and once in a
 legacy VM (confidential computing off):
 
 ```bash
-./memory_transfer_benchmark_sync  | tee table1_sync.log
-./memory_transfer_benchmark_async | tee table1_async.log
+(cd "$FLASH_ROOT/benchmarks/table1_bandwidth" &&
+  ./memory_transfer_benchmark_sync 2>&1 | tee table1_sync.log)
+(cd "$FLASH_ROOT/benchmarks/table1_bandwidth" &&
+  ./memory_transfer_benchmark_async 2>&1 | tee table1_async.log)
 ```
 
 ---
@@ -103,53 +113,86 @@ checkpoints. Each run produces the data for all four:
 ### Build
 
 ```bash
-cd artifact_flash/benchmarks/flash && make
-cd artifact_flash/benchmarks/phos_emul && make
-cd artifact_flash/benchmarks/gcr_emul && make
-```
-
-### Set up /dev/shm
-
-After every boot, enlarge `/dev/shm` and back it with huge pages. The
-checkpoint images live there.
-
-```bash
-sudo mount -o remount,size=200G,huge=always /dev/shm
+make -C "$FLASH_ROOT/benchmarks/flash"
+make -C "$FLASH_ROOT/benchmarks/phos_emul"
+make -C "$FLASH_ROOT/benchmarks/gcr_emul"
+make -C "$FLASH_ROOT/benchmarks/prealloc"
 ```
 
 ### Preallocate checkpoint buffers
 
-After every boot, and before any run, preallocate the staging buffer and
-checkpoint images so their allocation is not part of the measurement. 
-Static image size can be adjusted based on the mode size (i.e. 4GB, 16GB, 32GB ):
+Set `FLASH_SHM_SIZE` to your tmpfs limit (e.g. `200G`), and set the buffer
+variables below to capacities in GiB that fit the selected workload and guest.
+Leave room for image metadata. The static image must fit the model's weights;
+PhoS needs both base and delta images to fit the full allocation footprint.
+
+**Capacity:** 80 GiB staging + two 90 GiB images + 17 GiB static data consume
+277 GiB, exceeding the original 200 GiB tmpfs. Prepare one system at a time;
+size its buffers to the workload or add guest RAM and increase tmpfs. The
+workload and OS also need RAM. A fresh guest boot clears previous tmpfs
+buffers; reapply the per-boot settings above. Preallocation overwrites images
+at the named paths, so preserve any images you need first.
 
 ```bash
-cd artifact_flash/benchmarks/prealloc && make
-sudo ./ckpt_prealloc --gpu-size-gb 80 --out /dev/shm/ckpt_base.img --out-size-gb 90 --out
-sudo ./ckpt_prealloc --out /dev/shm/ckpt_static.img --out-size-gb 17
+: "${FLASH_SHM_SIZE:?Set the tmpfs limit, with sufficient guest RAM}"
+sudo mount -o "remount,size=$FLASH_SHM_SIZE,huge=always" /dev/shm
+df -h /dev/shm
+free -h
 ```
 
-### Setting up python virtual environment
+For FLASH with static classification, prepare all four buffers:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install vllm==0.8.5
-pip install -r artifact_flash/benchmarks/requirements.txt
+: "${FLASH_STAGING_GB:?Set staging capacity in GiB}"
+: "${FLASH_BASE_GB:?Set base image capacity in GiB}"
+: "${FLASH_DELTA_GB:?Set delta image capacity in GiB}"
+: "${FLASH_STATIC_GB:?Set static image capacity in GiB}"
+sudo "$FLASH_ROOT/benchmarks/prealloc/ckpt_prealloc" \
+  --gpu-size-gb "$FLASH_STAGING_GB" \
+  --file "/dev/shm/ckpt_base.img:$FLASH_BASE_GB" \
+  --file "/dev/shm/ckpt_delta.img:$FLASH_DELTA_GB" \
+  --file "/dev/shm/ckpt_static.img:$FLASH_STATIC_GB"
 ```
+
+For `v3`, omit the static image option. For PhoS and GCR, omit
+`--gpu-size-gb` and the static image option: PhoS uses base and delta images;
+GCR uses only the base image. Preallocation ends with `=== done ===`. FLASH's
+delta can grow if its initial capacity is too small, adding first-touch costs
+during the measured run.
+
+The FLASH commands below use `--no-prealloc` after this manual preparation:
+the agent's automatic preparation expects `./ckpt_prealloc`, whereas the
+Makefile builds that utility in `benchmarks/prealloc/`.
+
+### Set up the Python environment
+
+```bash
+python3 -m venv "$FLASH_ROOT/.venv"
+source "$FLASH_ROOT/.venv/bin/activate"
+python -m pip install -r "$FLASH_ROOT/benchmarks/requirements.txt" \
+  --extra-index-url https://download.pytorch.org/whl/cu124
+```
+
+The requirements pin vLLM 0.8.5 and PyTorch 2.6.0 with CUDA 12.4. The extra
+package index supplies the pinned `+cu124` PyTorch wheels; see the
+[official PyTorch 2.6.0 installation commands](https://docs.pytorch.org/get-started/previous-versions/#v260).
 
 ### Download the models and dataset
 
+The Llama models require Hugging Face access approval. Request access to the
+model repositories and authenticate before downloading:
+
 ```bash
-cd artifact_flash/benchmarks
-./download.sh
+hf auth login
+bash "$FLASH_ROOT/benchmarks/download.sh"
 ```
 
 Models go to `~/huggingface/`, and ShareGPT goes to `~/`, where
-`bench_inference_vllm_async.py` looks for it. The Llama models are gated:
-request access on Hugging Face and run `hf auth login` first.
+`bench_inference_vllm_async.py` searches for it. To download only the assets
+for the Llama-3.2-1B examples below, use
+`bash "$FLASH_ROOT/benchmarks/download.sh" sharegpt llama1b`.
 
-### Configuration for each Model/Application
+### Model and application configurations
 
 Flags for `bench_inference_vllm_async.py` (paper Table 2). Every run also uses
 `--dataset sharegpt --ignore-eos --gpu-memory-utilization 0.85 --seed 0`.
@@ -174,40 +217,102 @@ Checkpoint interval (1, 3 or 5 minutes):
 
 ### Run FLASH
 
-Example command running Llama-3.2-1B
+Run one system at a time. These examples use the Llama-3.2-1B short-output
+configuration. The 1,200-second submission window leaves time for the initial
+400-second delay and periodic checkpoints. `--rounds 10` is an upper limit:
+the run can produce fewer checkpoints if the application exits first. Extend
+the workload duration when using longer intervals or slower configurations.
 
-#### Terminal 1
-```bash
-cd artifact_flash/benchmarks/flash && make
-LD_PRELOAD=./artifact_flash/benchmarks/flash/libckpt_vllm.so python bench_inference_vllm_async.py --model ~/huggingface/Llama-3.2-1B-Instruct/ --dataset sharegpt  --rate 30 --duration 600 --ignore-eos --min-tokens 512 --max-tokens 512 --max-concurrent 512 --max-model-len 4096 --gpu-memory-utilization 0.85 --seed 0 
-```
+#### Terminal 1: start the workload
 
-#### Terminal 2 
-
-mode: v3 (FLASH without Static Classification) v3-static (FLASH with static Classification)
+Set `FLASH_ROOT` as above and activate the virtual environment in this terminal.
 
 ```bash
-sudo ./ckpt_agent --mode v3 --delay 400 --interval 60  --rounds 10
-sudo ./ckpt_agent --mode v3-static --delay 400 --interval 60  --rounds 10
+source "$FLASH_ROOT/.venv/bin/activate"
+mkdir -p "$FLASH_ROOT/benchmarks/results"
+cd "$FLASH_ROOT/benchmarks/flash"
+LD_PRELOAD="$FLASH_ROOT/benchmarks/flash/libckpt_vllm.so" \
+  python "$FLASH_ROOT/benchmarks/flash/bench_inference_vllm_async.py" \
+  --model "$HOME/huggingface/Llama-3.2-1B-Instruct" \
+  --dataset sharegpt --rate 30 --duration 1200 --ignore-eos \
+  --min-tokens 512 --max-tokens 512 --max-concurrent 512 \
+  --max-model-len 4096 --gpu-memory-utilization 0.85 --seed 0 \
+  --out-jsonl "$FLASH_ROOT/benchmarks/results/flash_requests.jsonl" \
+  2>&1 | tee "$FLASH_ROOT/benchmarks/results/flash_workload.log"
 ```
 
-### Run_PhoenixOS_Emul
+#### Terminal 2: start the checkpoint agent
 
-Example command running Llama-3.2-1B
+Set `FLASH_ROOT` in this terminal too. Use `v3-static` for FLASH with static
+classification. The agent must run from `benchmarks/flash/` so it can invoke
+`./ckpt_core`.
 
 ```bash
-cd artifact_flash/benchmarks/phos_emul && make
-PHOS_SCAN_KERNELS=1 LD_PRELOAD=./home/tdx/artifact_flash/benchmarks/phos_emul/libphos_intercept.so  PHOS_CKPT_DELAY=400 PHOS_CKPT_INTERVAL_MS=60000 PHOS_CKPT_ROUNDS=10  PHOS_STAGING_MB=4096 python bench_inference_vllm_async.py --model ~/huggingface/Llama-3.2-1B-Instruct/ --dataset sharegpt  --rate 30 --duration 600 --ignore-eos --min-tokens 512 --max-tokens 512 --max-concurrent 512 --max-model-len 4096 --gpu-memory-utilization 0.85 --seed 0 
+mkdir -p "$FLASH_ROOT/benchmarks/results"
+cd "$FLASH_ROOT/benchmarks/flash"
+sudo ./ckpt_agent --mode v3-static --no-prealloc \
+  --delay 400 --interval 60 --rounds 10 \
+  2>&1 | tee "$FLASH_ROOT/benchmarks/results/flash_checkpoint.log"
 ```
 
-### Run_GCR_Emul
+To measure FLASH without static classification, prepare the `v3` buffers and
+repeat the workload in a new process, replacing `--mode v3-static` with
+`--mode v3`. Use distinct result filenames for each run. Do not run both
+agents against the same workload.
 
-Example command running Llama-3.2-1B
+### Run the PhoenixOS emulation (PhoS)
+
+Prepare both base and delta buffers for PhoS, activate the environment, and
+run the same workload with its interception library. The emulation triggers
+checkpoints internally; do not launch the FLASH checkpoint agent.
 
 ```bash
-cd artifact_flash/benchmarks/gcr_emul && make
-LD_PRELOAD=./home/tdx/artifact_flash/benchmarks/gcr_emul/libgcr_intercept.so CKPT_STAGING_MB=4096  GCR_CKPT_DELAY=400 GCR_CKPT_INTERVAL_MS=60000 GCR_CKPT_ROUNDS=10 python bench_inference_vllm_async.py --model ~/huggingface/Llama-3.2-1B-Instruct/ --dataset sharegpt  --rate 30 --duration 600 --ignore-eos --min-tokens 512 --max-tokens 512 --max-concurrent 512 --max-model-len 4096 --gpu-memory-utilization 0.85 --seed 0 
+source "$FLASH_ROOT/.venv/bin/activate"
+mkdir -p "$FLASH_ROOT/benchmarks/results"
+cd "$FLASH_ROOT/benchmarks/flash"
+PHOS_SCAN_KERNELS=1 PHOS_CKPT_DELAY=400 \
+  PHOS_CKPT_INTERVAL_MS=60000 PHOS_CKPT_ROUNDS=10 PHOS_STAGING_MB=4096 \
+  LD_PRELOAD="$FLASH_ROOT/benchmarks/phos_emul/libphos_intercept.so" \
+  python "$FLASH_ROOT/benchmarks/flash/bench_inference_vllm_async.py" \
+  --model "$HOME/huggingface/Llama-3.2-1B-Instruct" \
+  --dataset sharegpt --rate 30 --duration 1200 --ignore-eos \
+  --min-tokens 512 --max-tokens 512 --max-concurrent 512 \
+  --max-model-len 4096 --gpu-memory-utilization 0.85 --seed 0 \
+  --out-jsonl "$FLASH_ROOT/benchmarks/results/phos_requests.jsonl" \
+  2>&1 | tee "$FLASH_ROOT/benchmarks/results/phos.log"
 ```
 
+### Run the GCR emulation
 
+Prepare GCR's base buffer, then run:
 
+```bash
+source "$FLASH_ROOT/.venv/bin/activate"
+mkdir -p "$FLASH_ROOT/benchmarks/results"
+cd "$FLASH_ROOT/benchmarks/flash"
+GCR_CKPT_DELAY=400 GCR_CKPT_INTERVAL_MS=60000 GCR_CKPT_ROUNDS=10 \
+  CKPT_STAGING_MB=4096 \
+  LD_PRELOAD="$FLASH_ROOT/benchmarks/gcr_emul/libgcr_intercept.so" \
+  python "$FLASH_ROOT/benchmarks/flash/bench_inference_vllm_async.py" \
+  --model "$HOME/huggingface/Llama-3.2-1B-Instruct" \
+  --dataset sharegpt --rate 30 --duration 1200 --ignore-eos \
+  --min-tokens 512 --max-tokens 512 --max-concurrent 512 \
+  --max-model-len 4096 --gpu-memory-utilization 0.85 --seed 0 \
+  --out-jsonl "$FLASH_ROOT/benchmarks/results/gcr_requests.jsonl" \
+  2>&1 | tee "$FLASH_ROOT/benchmarks/results/gcr.log"
+```
+
+### Read the outputs
+
+The workload prints completed requests, throughput, time to first token, and
+inter-token latency. `--out-jsonl` saves per-request measurements under
+`benchmarks/results/`. The checkpoint logs report phase timings and dirty
+sizes; the FLASH agent also prints a CSV summary at the end. Its final
+`Restore Emulation` section is an estimated transfer time, not a measured
+end-to-end restore benchmark.
+
+The default FLASH images are `/dev/shm/ckpt_base.img`,
+`/dev/shm/ckpt_delta.img`, and, in `v3-static` mode,
+`/dev/shm/ckpt_static.img`. They are overwritten by later checkpoints and
+removed when the guest reboots. Copy any images needed for further analysis
+before preparing another run.
