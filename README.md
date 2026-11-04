@@ -6,7 +6,7 @@
 
 Jonghyun Lee, Taewoon Kang, Yongqin Wang, Rachit Rajat, Mengyuan Li, Gunjae Koo, Daniel Wong, and Murali Annavaram.
 
-[![Paper PDF](https://img.shields.io/badge/Paper-PDF-b31b1b)](docs/flash-atc2026.pdf) [![Artifact DOI](https://img.shields.io/badge/Artifact-10.5281%2Fzenodo.23199897-blue)](https://doi.org/10.5281/zenodo.23199897) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Presented by verifiable.pro](docs/brand/presented-by-verifiable-pro.svg)](https://verifiable.pro/)
+[![Paper PDF](https://img.shields.io/badge/Paper-PDF-b31b1b)](docs/flash-atc2026.pdf) [![Artifact DOI](https://img.shields.io/badge/Artifact-10.5281%2Fzenodo.23199897-blue)](https://doi.org/10.5281/zenodo.23199897) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Presented by verifiable.pro](docs/brand/presented-by-verifiable-pro.svg "Presented by verifiable.pro")](https://verifiable.pro/ "Presented by verifiable.pro")
 
 FLASH is a **GPU checkpoint/restore system for confidential LLM inference** on **NVIDIA H100 and Intel TDX**. It saves encrypted GPU data, including the key-value (KV) cache, while vLLM continues serving requests. A hybrid-key checkpoint format avoids redundant CPU cryptography, and UVM write faults identify the pages that must be copied during the final pause.
 
