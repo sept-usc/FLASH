@@ -1,77 +1,82 @@
 ---
-title: FLASH: checkpointing confidential LLM inference on NVIDIA H100
-dek: FLASH retains GPU ciphertext and tracks modified memory pages to shorten checkpoint pauses in confidential inference. Its H100 and Intel TDX evaluation shows how recovery support can be built around the encrypted GPU data path.
+title: "FLASH: checkpointing confidential LLM inference on NVIDIA H100"
+dek: "FLASH reuses GPU ciphertext and UVM dirty-page tracking to shorten checkpoint pauses. Its H100 and Intel TDX evaluation distinguishes pause latency, serving impact, and recovery time."
 kind: explainer
 topics: [confidential-computing]
 layers: [runtime, hardware]
+published: 2026-11-04
 agent: research
 evidence: [paper, code]
 draft: true
-disclosure: Mengyuan Li, editor of verifiable.pro, is a co-author of FLASH. This article presents that research; it does not report an independent reproduction by verifiable.pro.
+disclosure: "Mengyuan Li, editor of verifiable.pro, is a co-author of FLASH."
 sources:
-  - FLASH: Fault-Led, Attested, Secure Hybrid-Key Checkpoint for Confidential Inference | Jonghyun Lee et al., ACM SIGOPS ATC 2026 | 2026 | https://github.com/sept-usc/FLASH/blob/cfe082f3fa9d6f68374b312c934fc86668ffc510/docs/flash-atc2026.pdf
-  - FLASH source code and reproduction instructions | FLASH authors | accessed 2026-11-04 | https://github.com/sept-usc/FLASH
-  - ATC 2026 artifact evaluation results | Systems Research Artifacts | accessed 2026-11-04 | https://sysartifacts.github.io/atc2026/results
-  - jonghyunL/artifact_flash: ATC Artifact Evaluation | Zenodo | 2026-10-07 | https://doi.org/10.5281/zenodo.23199897
-related: [remote-attestation-for-ai-workloads-explained, how-to-read-a-remote-attestation-report]
+  - "FLASH: Fault-Led, Attested, Secure Hybrid-Key Checkpoint for Confidential Inference | Jonghyun Lee et al., ACM SIGOPS ATC 2026 | 2026 | https://github.com/sept-usc/FLASH/blob/cfe082f3fa9d6f68374b312c934fc86668ffc510/docs/flash-atc2026.pdf"
+  - "FLASH source code and reproduction instructions | FLASH authors | accessed 2026-11-04 | https://github.com/sept-usc/FLASH"
+  - "ATC 2026 artifact evaluation results | Systems Research Artifacts | accessed 2026-11-04 | https://sysartifacts.github.io/atc2026/results"
+  - "jonghyunL/artifact_flash: ATC Artifact Evaluation | Zenodo | 2026-10-07 | https://doi.org/10.5281/zenodo.23199897"
+related: [remote-attestation-for-ai-workloads-explained, how-to-read-a-remote-attestation-report, private-ai-compute-published-designs]
 ---
 
-FLASH is a checkpoint and recovery system for confidential large language model (LLM) inference. It saves the data state needed to resume serving while limiting the time that inference must pause. The design combines encrypted checkpoint storage with memory tracking in NVIDIA's driver, and the paper evaluates it on one NVIDIA H100 GPU with Intel Trust Domain Extensions (TDX). The result concerns a specific operational problem: keeping protected inference state recoverable without repeatedly stopping the service for a full GPU memory dump.[^1]
+FLASH saves the protected data state of large language model (LLM) inference so a service can recover without pausing for a full graphics processing unit (GPU) memory dump at every checkpoint. Its approach combines reuse of GPU-generated ciphertext with driver-level tracking of modified memory. The operational problem is preserving active requests while keeping the act of saving them from disrupting serving.[^1]
 
-The paper, *FLASH: Fault-Led, Attested, Secure Hybrid-Key Checkpoint for Confidential Inference*, is by Jonghyun Lee, Taewoon Kang, Yongqin Wang, Rachit Rajat, Mengyuan Li, Gunjae Koo, Daniel Wong, and Murali Annavaram, for ACM SIGOPS ATC 2026.[^1]
+The [final FLASH paper](https://github.com/sept-usc/FLASH/blob/cfe082f3fa9d6f68374b312c934fc86668ffc510/docs/flash-atc2026.pdf), by Jonghyun Lee and colleagues for ACM SIGOPS ATC 2026, evaluates that approach on one confidential H100. Understanding its result requires separating three things: the checkpoint pause, the effect on requests during background copying, and the time needed to recover afterward.[^1]
 
-## Why encrypted inference is harder to checkpoint
+## Why protection makes saving state expensive
 
-During inference, a model accumulates a key-value (KV) cache holding attention state from the tokens it has processed. Losing the cache discards work already done for active requests. A checkpoint saves this state so that recovery can resume from a saved position. In a confidential deployment, a CPU trusted execution environment (TEE) and a GPU TEE are designed to keep model and request data from a malicious cloud host within their hardware threat models.[^1]
+Inference builds a key-value (KV) cache containing attention state for previously processed tokens. Losing that cache discards work for active requests. Recomputing from prompts repeats processing, and stochastic token sampling can produce a different continuation. A checkpoint preserves the data needed to resume from a saved position.[^1]
 
-That protection changes the checkpoint path. GPU data must cross an untrusted PCIe connection before it can be saved. The H100 copy engine encrypts transfers leaving protected GPU memory. A conventional secure checkpoint then decrypts the arriving data in the CPU TEE and encrypts it again under a checkpoint key. This adds CPU cryptographic work to an already constrained transfer.[^1]
+Confidential inference places the central processing unit (CPU) and GPU inside trusted execution environments (TEEs), designed to protect their contents from a malicious cloud operator. In the evaluated H100 configuration, the Peripheral Component Interconnect Express (PCIe) connection remains untrusted, so GPU data must leave protected memory encrypted.[^1]
 
-In the paper's setup, confidential-mode bandwidth drops from roughly 40 GB/s to 7.3 GB/s. Moving 80 GB at that rate alone takes about 11 seconds, before the extra checkpoint encryption. Pausing inference for the full operation therefore makes checkpoint creation a visible service interruption.[^1]
+A conventional secure checkpoint decrypts that arriving ciphertext inside the CPU TEE, then encrypts the saved state under a checkpoint key. The paper measures roughly 40 GB/s without confidential mode and 7.3 GB/s with it. Transferring 80 GB at the latter rate alone takes about 11 seconds, before additional checkpoint encryption.[^1]
 
-## Reuse the GPU's ciphertext
+## Keep the encryption already performed
 
-FLASH preserves the ciphertext that the copy engine already produced. A custom driver interface retrieves the encrypted pages with their initialization vectors (IVs) and authentication tags. The checkpoint stores these pages directly, removing the CPU decrypt-then-reencrypt cycle from the frequent checkpoint path.[^1]
+FLASH retains the device-to-host ciphertext produced by the GPU copy engine. A custom driver interface retrieves encrypted pages together with their initialization vectors (IVs) and authentication tags. This removes a redundant CPU decryption and re-encryption cycle from checkpoint creation.[^1]
 
-The resulting image uses two key domains. GPU pages retain their device-to-host encryption under the source session key. CPU state and the source GPU key are protected under the checkpoint key. The stored metadata gives a recovery agent the context needed to authenticate and decrypt the original GPU pages. Data entering a destination GPU then follows that destination's protected transfer path.[^1]
+The image therefore contains two protection domains. GPU pages remain encrypted under the source GPU session key. CPU state and that source key are encrypted under the checkpoint key. Saved IVs, tags, and metadata let the recovery agent reconstruct the original decryption context.[^1]
 
-This changes when cryptographic work happens. FLASH avoids redundant CPU encryption work each time it creates a checkpoint; recovery still has to reconstruct and decrypt the saved state. A shorter checkpoint pause should therefore be interpreted separately from recovery latency.[^1]
+Recovery still performs cryptographic work. The destination obtains the checkpoint key, unwraps the source GPU key, and authenticates and decrypts saved GPU pages inside protected CPU memory. Loading them onto the destination GPU uses its new protected transfer session. Retaining ciphertext accelerates repeated saving; it does not eliminate reconstruction or decryption during recovery.[^1]
 
-## Copy in the background, then capture the dirty delta
+## Find writes while inference continues
 
-Keeping ciphertext reduces the cost per byte. FLASH also reduces the amount of data that must move while serving is paused. It first copies GPU memory while inference continues. Writes during that background copy can make saved pages stale, so FLASH must identify the pages that need copying again.[^1]
+Most copying overlaps with inference. Because inference can change a page after it has been copied, FLASH must identify which pages need another copy during the final pause.[^1]
 
-FLASH brings allocations under NVIDIA Unified Virtual Memory (UVM) control by interposing on allocation calls. It marks tracked pages read-only. A later write raises a fault that the driver records in a dirty bitmap before allowing the write to proceed. Tracking uses 2 MB regions, trading some overcounting for fewer fault-handling events than tracking individual 4 KB pages.[^1]
+It brings allocations under NVIDIA Unified Virtual Memory (UVM) management by intercepting allocation calls and substituting managed allocations, then prefetching them onto the GPU. Tracked pages become read-only. A write raises a fault, allowing the guest driver to record the affected region as dirty and restore write permission before execution continues.[^1]
 
-After background copying, FLASH pauses execution to copy the dirty delta and then resumes serving. This is the stop-and-copy phase. Its latency depends on the state modified during the tracking window, rather than the full GPU footprint. The mechanism operates below the LLM kernels and does not require offline analysis of their PTX code.[^1]
+FLASH tracks at 2 MB granularity. On the first fault in a region, it proactively handles the larger region, avoiding the cost of potentially hundreds of separate 4 KB faults. This can count some unchanged bytes as dirty, but reduces fault handling. It requires neither changes to LLM kernels nor offline analysis of Parallel Thread Execution (PTX) code.[^1]
 
-## Keep static data in the recovery image
+At an intercepted framework synchronization point, outstanding GPU work has drained. FLASH pauses execution, copies the accumulated dirty regions, and resumes serving. The tracking window depends partly on when the application reaches that synchronization point, so it can extend beyond the background copy itself.[^1]
 
-Model weights usually stay unchanged after initialization. In the paper's static-allocation design, FLASH captures static state once and reuses it in later checkpoint images. Those pages remain write-protected, and a subsequent write promotes the affected region to dynamic state. Recovery still restores both static and dynamic data.[^1]
+## Reuse static data without dropping it from recovery
 
-The released evaluation agent exposes `v3-static` for static classification. Its default identifies allocations using host-to-device transfer flags; a separate `--learn` option enables the learning path. These implementation choices matter when matching a run to the design described in the paper.[^2]
+Model weights usually remain unchanged after loading. The paper's static classification captures such state once and reuses it across checkpoints. Static pages remain monitored: a later write faults and promotes the affected region to dynamic state. Recovery restores both static and dynamic data, including request metadata needed by the restarted framework.[^1]
 
-## Bind saved state to keys, page positions, and freshness
+The release makes an implementation distinction worth preserving. Its default `v3-static` mode identifies static allocations through host-to-device allocation flags. Learning is a separate, opt-in `--learn` path. A run using the default should not be described as automatically exercising the paper's learning mechanism.[^2]
 
-Confidentiality alone is insufficient when the host storing an image is untrusted. It could alter a page, put an authentic page in the wrong position, or present an old checkpoint. FLASH's security protocol addresses these as separate obligations.[^1]
+## What the H100 measurements establish
 
-Authentication tags protect encrypted page contents. An authenticated manifest records page positions and their cryptographic metadata, and its hash is bound to a TDX-signed freshness report. A trusted remote attestation service holds checkpoint keys and the latest freshness record. During recovery, the protocol checks the record before releasing the key to an accepted confidential virtual machine.[^1]
+The evaluation uses one 80 GB NVIDIA H100 in confidential mode, Intel Trust Domain Extensions (TDX), and vLLM 0.8.5. It covers Llama-3.2-1B, Qwen-2.5-7B, and Llama-2-13B under short-context Chatbot and long-context Reasoning workloads. Images are staged in memory-backed `tmpfs`, and the load generator bypasses the web-serving layer.[^1]
 
-Attestation supplies evidence about the software loaded in that environment; the design still trusts that software to perform the checks correctly. It also trusts the CPU and GPU security mechanisms, the guest kernel and driver, and the remote service's state. The paper's analysis does not cover availability against a malicious host or hide checkpoint sizes, access patterns, and timing.[^1]
+The paper's 1.2-second mean stop-and-copy summary spans FLASH and FLASH-SC, its version without static classification. It reports a 9.4× reduction relative to PhoenixOS (PhOS) and 7.8× relative to GCR at a one-minute checkpoint interval. Those comparisons use reimplemented data paths because the original systems do not run unchanged on this confidential stack. They measure the authors' implementations of the comparison protocols under the shared setup.[^1]
 
-## What the H100 evaluation measures
+At a one-minute checkpoint interval, serving overhead varies substantially. In the Llama-1B Reasoning workload, FLASH reports 75.8 ms at the 99th percentile for time to first token, compared with 14,364.9 ms for PhOS and 6,385.6 ms for GCR. Yet the one-minute Llama-1B Chatbot case produces a FLASH 95th-percentile first-token time of about 13.3 seconds, worse than both comparisons. Write-fault tracking also adds time between tokens. Short checkpoint pauses do not imply uniformly low serving overhead.[^1]
 
-The evaluation uses one 80 GB H100 in confidential computing mode, Intel TDX, and vLLM 0.8.5. It tests Llama-3.2-1B, Qwen-2.5-7B, and Llama-2-13B under short-context Chatbot and long-context Reasoning workloads. Checkpoint images are staged in DRAM-backed tmpfs.[^1]
+Recovery is a separate measurement. Restoring the full approximately 66–67 GB footprint takes 18.7, 17.1, and 18.1 seconds across the three models. Static classification does not remove weights from that transfer.[^1]
 
-The paper summarizes an average stop-and-copy latency of 1.2 seconds across FLASH and its FLASH-SC ablation, which omits static classification. It reports a 9.4-fold reduction relative to its PhoenixOS-based comparison, PhOS, and a 7.8-fold reduction relative to GCR at a one-minute checkpoint interval. The comparison systems are reimplemented data paths on the same confidential stack; the original published artifacts do not run unchanged on that platform.[^1]
+## Integrity and freshness depend on trusted services
 
-These measurements establish the reported checkpoint pause in that setup. They do not imply that every inference request sees the same improvement. The paper also measures time to first token and time between tokens, and reports a less favorable high-concurrency Llama-1B Chatbot case. Serving impact depends on the workload and the interaction between tracking and the framework's synchronization points.[^1]
+Encryption alone cannot reject an old, valid checkpoint. FLASH combines authenticated encryption with a manifest binding page positions and cryptographic metadata. A TDX-signed report binds the manifest hash, confidential virtual machine identity, checkpoint counter, and timestamp. A trusted remote attestation service (RAS) retains checkpoint keys and the latest counter and manifest hash; recovery rejects images that disagree with that record.[^1]
 
-## Inspect the artifact and its evaluation record
+This relies on the CPU and GPU protections, guest kernel, driver, checkpoint agent, and RAS operating correctly. The RAS must preserve its trusted state across guest teardown and remain outside the adversary's control. Attestation supplies evidence about software loaded into an environment; it never guarantees runtime correctness. Our [remote attestation explainer](https://verifiable.pro/articles/remote-attestation-for-ai-workloads-explained/) and [guide to reading an attestation report](https://verifiable.pro/articles/how-to-read-a-remote-attestation-report/) explain that distinction.
 
-The [FLASH repository](https://github.com/sept-usc/FLASH) contains the modified NVIDIA UVM driver, checkpoint and restore programs, and comparison benchmarks. Reproduction requires the documented H100 and TDX environment and pinned driver, CUDA, and vLLM versions. Integrating the paper's complete remote attestation and key-release service requires work beyond the released evaluation programs.[^2]
+Availability and leakage through volume, access patterns, and timing remain outside FLASH's protection. A malicious host can withhold an image or service. The protocol fails closed when required state is unavailable.[^1]
 
-The [ATC artifact evaluation results](https://sysartifacts.github.io/atc2026/results) list FLASH with Artifacts Available, Artifacts Evaluated – Functional, and Results Reproduced badges. The evaluated artifact is preserved in [Zenodo](https://doi.org/10.5281/zenodo.23199897). These are the conference's recorded evaluation outcomes.[^3, 4]
+## The deployment boundary
+
+FLASH saves inference data state and rebuilds execution context by restarting the framework. It supplies no general GPU control-state snapshot, and globally consistent multi-GPU checkpointing is outside the evaluated scope. Future trusted input/output paths can also remove the intermediary ciphertext that its reuse optimization depends on.[^1]
+
+The [FLASH repository and its two mechanism diagrams](https://github.com/sept-usc/FLASH) provide driver modifications and evaluation programs. They do not supply a complete production RAS and key-release deployment; that needs additional integration.[^2] The [conference artifact record](https://sysartifacts.github.io/atc2026/results) lists Artifacts Available, Artifacts Evaluated – Functional, and Results Reproduced.[^3] The [archived evaluation artifact](https://doi.org/10.5281/zenodo.23199897) preserves the release.[^4] Our [comparison of published private AI compute designs](https://verifiable.pro/articles/private-ai-compute-published-designs/) offers broader context for separating mechanisms from deployment claims.
 
 :::analysis
-FLASH connects two requirements that confidential AI services must consider together: protected state must remain recoverable, and recovery must retain the integrity and freshness checks that give the saved state meaning. The implementation shows how retaining existing ciphertext and tracking writes in the driver can shorten the checkpoint pause. For a deployment, the remaining checks include the exact software version, the recovery integration, and the trusted service that binds key release to the accepted checkpoint.
+FLASH shows how an existing encrypted transfer path can support recoverable confidential inference with shorter checkpoint pauses. Deployment decisions still depend on workload behavior, complete restore integration, and a durable trusted freshness service. The reported pause is one part of that assessment.
 :::
