@@ -3,7 +3,7 @@
 The bilingual explainer was generated through the daily editorial pipeline from the final FLASH paper and published on **November 4, 2026**:
 
 - [English: FLASH: checkpointing confidential LLM inference on NVIDIA H100](https://verifiable.pro/articles/flash-confidential-gpu-checkpoint/)
-- [中文：FLASH 如何在 H100 上为机密 GPU 大语言模型推理保存检查点](https://verifiable.pro/zh/articles/flash-confidential-gpu-checkpoint/)
+- [中文：FLASH：在 NVIDIA H100 上为机密 LLM 推理建立检查点](https://verifiable.pro/zh/articles/flash-confidential-gpu-checkpoint/)
 
 The neighboring [English](en.md) and [Chinese](zh.md) files preserve the pipeline's manuscript snapshots, including their original draft metadata. The published editions add filing metadata, captioned diagrams, and localized contextual links. Their maintained sources live in the [verifiable.pro repository](https://github.com/Anything-Anywhere-Verifiable/verifiable-pro/tree/main/content/articles/flash-confidential-gpu-checkpoint).
 
