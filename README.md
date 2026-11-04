@@ -6,7 +6,7 @@
 
 Jonghyun Lee, Taewoon Kang, Yongqin Wang, Rachit Rajat, Mengyuan Li, Gunjae Koo, Daniel Wong, and Murali Annavaram.
 
-[![Paper PDF](https://img.shields.io/badge/Paper-PDF-b31b1b)](docs/flash-atc2026.pdf) [![Artifact DOI](https://img.shields.io/badge/Artifact-10.5281%2Fzenodo.23199897-blue)](https://doi.org/10.5281/zenodo.23199897) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Presented by verifiable.pro](docs/brand/presented-by-verifiable-pro.svg "Presented by verifiable.pro")](https://verifiable.pro/ "Presented by verifiable.pro")
+[![Paper PDF](https://img.shields.io/badge/Paper-PDF-b31b1b)](docs/flash-atc2026.pdf) [![Artifact DOI](https://img.shields.io/badge/Artifact-10.5281%2Fzenodo.23199897-blue)](https://doi.org/10.5281/zenodo.23199897) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Presented by verifiable.pro](docs/brand/presented-by-verifiable-pro.svg "Presented by verifiable.pro")](https://verifiable.pro/articles/flash-confidential-gpu-checkpoint/ "Presented by verifiable.pro")
 
 FLASH is a **GPU checkpoint/restore system for confidential LLM inference** on **NVIDIA H100 and Intel TDX**. It saves encrypted GPU data, including the key-value (KV) cache, while vLLM continues serving requests. A hybrid-key checkpoint format avoids redundant CPU cryptography, and UVM write faults identify the pages that must be copied during the final pause.
 
@@ -147,7 +147,7 @@ The serving experiments compare PhOS, GCR, FLASH-SC, and FLASH with the model/wo
 | [`benchmarks/download.sh`](benchmarks/download.sh) | Model and ShareGPT dataset downloads |
 | [`docs/flash-atc2026.pdf`](docs/flash-atc2026.pdf) | Final paper and evaluation details |
 | [`docs/figures/`](docs/figures/) | Editable SVG diagrams, PNG exports, and the original latency plot |
-| [`docs/verifiable-pro/`](docs/verifiable-pro/) | English and Chinese FLASH explainer drafts for verifiable.pro |
+| [`docs/verifiable-pro/`](docs/verifiable-pro/) | Pipeline manuscript snapshots and links to the published bilingual explainer |
 
 ## Scope and limitations
 
@@ -183,9 +183,9 @@ The FLASH code is [MIT licensed](LICENSE). Files derived from NVIDIA's `open-gpu
 <p>
   <a href="https://septlab.com/"><img src="docs/brand/septlab-icon.png" alt="SEPT Lab" height="38"></a>
   &nbsp;&nbsp;&nbsp;
-  <a href="https://verifiable.pro/"><img src="docs/brand/presented-by-verifiable-pro-lockup.svg" alt="Presented by verifiable.pro" height="38"></a>
+  <a href="https://verifiable.pro/articles/flash-confidential-gpu-checkpoint/"><img src="docs/brand/presented-by-verifiable-pro-lockup.svg" alt="Presented by verifiable.pro" height="38"></a>
 </p>
 
 Explore systems security research at [SEPT Lab](https://septlab.com/) and research explanations about verifiable AI at [verifiable.pro](https://verifiable.pro/).
 
-**Presented by verifiable.pro** · Read the FLASH explainer draft in [English](docs/verifiable-pro/en.md) or [中文](docs/verifiable-pro/zh.md).
+**Presented by verifiable.pro** · Read the FLASH explainer in [English](https://verifiable.pro/articles/flash-confidential-gpu-checkpoint/) or [中文](https://verifiable.pro/zh/articles/flash-confidential-gpu-checkpoint/).
